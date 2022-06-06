@@ -65,6 +65,71 @@ static void time_bucket_func(sqlite3_context *context, int argc,
   sqlite3_result_int64(context, bucket);
 }
 
+static void lerp_func(sqlite3_context *context, int argc,
+                      sqlite3_value **argv) {
+  UNUSED(argc);
+
+  sqlite3_int64 a_ts = sqlite3_value_int64(argv[0]);
+  double a_value = sqlite3_value_double(argv[1]);
+  sqlite3_int64 norm_b_ts = sqlite3_value_int64(argv[2]) - a_ts;
+  double b_value = sqlite3_value_double(argv[3]);
+  sqlite3_int64 norm_t = sqlite3_value_int64(argv[4]) - a_ts;
+
+  double res =
+      a_value + ((double)norm_t / (double)norm_b_ts) * (b_value - a_value);
+
+  sqlite3_result_double(context, res);
+}
+
+static void last_known_step_func(sqlite3_context *context, int argc,
+                                 sqlite3_value **argv) {
+  UNUSED(argc);
+
+  if (sqlite3_value_type(argv[0]) == SQLITE_NULL) {
+    return;
+  }
+
+  sqlite3_value **state =
+      sqlite3_aggregate_context(context, sizeof(sqlite3_value *));
+  if (!state) {
+    sqlite3_result_error_nomem(context);
+    return;
+  }
+
+  *state = sqlite3_value_dup(argv[0]);
+}
+
+static void last_known_final_func(sqlite3_context *context) {
+  sqlite3_value **state =
+      sqlite3_aggregate_context(context, sizeof(sqlite3_value *));
+  if (!state) {
+    sqlite3_result_error_nomem(context);
+    return;
+  }
+
+  if (!*state) {
+    sqlite3_result_null(context);
+    return;
+  }
+  sqlite3_result_value(context, *state);
+  sqlite3_value_free(*state);
+}
+
+static void last_known_value_func(sqlite3_context *context) {
+  sqlite3_value **state =
+      sqlite3_aggregate_context(context, sizeof(sqlite3_value *));
+  if (!state) {
+    sqlite3_result_error_nomem(context);
+    return;
+  }
+
+  if (!*state) {
+    sqlite3_result_null(context);
+    return;
+  }
+  sqlite3_result_value(context, *state);
+}
+
 #ifdef _WIN32
 __declspec(dllexport)
 #endif
@@ -72,18 +137,32 @@ __declspec(dllexport)
                             const sqlite3_api_routines *pApi) {
   UNUSED(pzErrMsg);
 
-  int rc = SQLITE_OK;
   SQLITE_EXTENSION_INIT2(pApi);
 
-  rc = sqlite3_create_function(db, "interval", 1,
-                               SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL,
-                               interval_func, NULL, NULL);
-
-  if (rc == SQLITE_OK) {
-    rc = sqlite3_create_function(db, "time_bucket", 2,
-                                 SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL,
-                                 time_bucket_func, NULL, NULL);
+  int rc = sqlite3_create_function(db, "interval", 1,
+                                   SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL,
+                                   interval_func, NULL, NULL);
+  if (rc != SQLITE_OK) {
+    return rc;
   }
+
+  rc = sqlite3_create_function(db, "time_bucket", 2,
+                               SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL,
+                               time_bucket_func, NULL, NULL);
+  if (rc != SQLITE_OK) {
+    return rc;
+  }
+
+  rc =
+      sqlite3_create_function(db, "lerp", 5, SQLITE_UTF8 | SQLITE_DETERMINISTIC,
+                              NULL, lerp_func, NULL, NULL);
+  if (rc != SQLITE_OK) {
+    return rc;
+  }
+
+  rc = sqlite3_create_window_function(
+      db, "last_known", 1, SQLITE_UTF8, NULL, last_known_step_func,
+      last_known_final_func, last_known_value_func, last_known_step_func, NULL);
 
   return rc;
 }

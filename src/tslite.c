@@ -96,6 +96,9 @@ static void last_known_step_func(sqlite3_context *context, int argc,
     return;
   }
 
+  if (*state) {
+    sqlite3_value_free(*state);
+  }
   *state = sqlite3_value_dup(argv[0]);
 }
 

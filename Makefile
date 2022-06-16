@@ -1,5 +1,5 @@
 HEADERS = 
-SOURCE  = src/tslite.c
+SOURCE  = src/array.c src/utils.c src/tslite.c
 
 .PHONY: all
 all: tslite.so

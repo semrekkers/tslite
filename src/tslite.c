@@ -182,6 +182,13 @@ __declspec(dllexport)
   rc = sqlite3_create_function(db, "array_length", 1,
                                SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL,
                                array_length_func, NULL, NULL);
+  if (rc != SQLITE_OK) {
+    return rc;
+  }
+
+  rc = sqlite3_create_function(db, "array_append", -1,
+                               SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL,
+                               array_append_func, NULL, NULL);
 
   return rc;
 }

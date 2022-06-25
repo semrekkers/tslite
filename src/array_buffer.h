@@ -26,6 +26,13 @@ static void put_u64(unsigned char *z, sqlite3_uint64 y) {
   z[7] = (unsigned char)(y);
 }
 
+static sqlite3_uint64 get_u64(unsigned char *z) {
+  return (((sqlite3_uint64)z[0]) | ((sqlite3_uint64)z[1]) << 8 |
+          ((sqlite3_uint64)z[2]) << 16 | ((sqlite3_uint64)z[3]) << 24 |
+          ((sqlite3_uint64)z[4]) << 32 | ((sqlite3_uint64)z[5]) << 40 |
+          ((sqlite3_uint64)z[6]) << 48 | ((sqlite3_uint64)z[7]) << 56);
+}
+
 // Write a 64-bit variable-length integer to memory starting at p[0].
 // The length of data write will be between 1 and 9 bytes.  The number
 // of bytes written is returned.
@@ -70,14 +77,14 @@ static int put_varint64(unsigned char *p, sqlite3_uint64 v) {
   return n;
 }
 
-#define SLOT_2_0 0x001fc07f
-#define SLOT_4_2_0 0xf01fc07f
-
 // Read a 64-bit variable-length integer from memory starting at p[0].
 // Return the number of bytes read.  The value is stored in *v.
 //
 // Source from sqlite3GetVarint in sqlite3/src/util.c.
-static unsigned char get_varint(const unsigned char *p, sqlite3_uint64 *v) {
+static unsigned char get_varint(unsigned char *p, sqlite3_uint64 *v) {
+#define SLOT_2_0 0x001fc07f
+#define SLOT_4_2_0 0xf01fc07f
+
   unsigned int a, b, s;
 
   if (((signed char *)p)[0] >= 0) {

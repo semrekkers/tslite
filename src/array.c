@@ -2,15 +2,6 @@
 
 #include "array_buffer.h"
 
-#define ARRAY_TYPE_NULL 0
-#define ARRAY_TYPE_INTEGER 1
-#define ARRAY_TYPE_INTEGER_NEG 2
-#define ARRAY_TYPE_FLOAT 3
-#define ARRAY_TYPE_ZERO 4
-#define ARRAY_TYPE_ONE 5
-#define ARRAY_TYPE_BLOB 6
-#define ARRAY_TYPE_TEXT 7
-
 static int array_buffer_append_value(array_buffer *buf, sqlite3_value *item) {
   int res;
 
@@ -84,6 +75,148 @@ static int array_buffer_append_value(array_buffer *buf, sqlite3_value *item) {
   return res;
 }
 
+static int array_value_advance(unsigned char *z, int n) {
+  if (!z || n < 1) {
+    return -1;
+  }
+
+  int x;
+  switch (*z) {
+    case ARRAY_TYPE_NULL:
+    case ARRAY_TYPE_ONE:
+    case ARRAY_TYPE_ZERO:
+      return 1;
+
+    case ARRAY_TYPE_INTEGER:
+    case ARRAY_TYPE_INTEGER_NEG:
+      for (x = 1; x < n; x++) {
+        if (!(z[x] & 0x80)) {
+          if (x > 1 + 9) {  // 1 byte type identifier + max varint (9 bytes).
+            return -1;
+          }
+          return x + 1;
+        }
+      }
+      return -1;
+
+    case ARRAY_TYPE_FLOAT:
+      if (n < 9) {
+        return -1;
+      }
+      return 9;
+
+    case ARRAY_TYPE_BLOB:
+    case ARRAY_TYPE_TEXT:
+      if (n < 2) {
+        return -1;
+      }
+      sqlite3_uint64 v;
+      x = get_varint(&z[1], &v);
+      x = 1 + x + v;
+      if (x < n) {
+        return -1;
+      }
+      return x;
+  }
+
+  return -1;
+}
+
+static const char *array_value_type(unsigned char v) {
+  switch (v) {
+    case ARRAY_TYPE_NULL:
+      return "null";
+
+    case ARRAY_TYPE_ZERO:
+    case ARRAY_TYPE_ONE:
+    case ARRAY_TYPE_INTEGER:
+    case ARRAY_TYPE_INTEGER_NEG:
+      return "integer";
+
+    case ARRAY_TYPE_FLOAT:
+      return "real";
+
+    case ARRAY_TYPE_TEXT:
+      return "text";
+
+    case ARRAY_TYPE_BLOB:
+      return "blob";
+  }
+
+  return NULL;
+}
+
+static int array_value_decode(sqlite3_context *context, unsigned char *z,
+                              int n) {
+  if (!z || n < 1) {
+    return -1;
+  }
+
+  int x;
+  double_rep value;
+  switch (*z) {
+    case ARRAY_TYPE_NULL:
+      sqlite3_result_null(context);
+      return 1;
+
+    case ARRAY_TYPE_ONE:
+      sqlite3_result_int(context, 1);
+      return 1;
+
+    case ARRAY_TYPE_ZERO:
+      sqlite3_result_int(context, 0);
+      return 1;
+
+    case ARRAY_TYPE_INTEGER:
+    case ARRAY_TYPE_INTEGER_NEG:
+      if (n < 2) {
+        return -1;
+      }
+      sqlite3_int64 valueInt;
+      x = 1 + get_varint(&z[1], &value.d);
+      if (n < x) {
+        return -1;
+      }
+      if (*z == ARRAY_TYPE_INTEGER_NEG) {
+        valueInt = -value.d;
+      } else {
+        valueInt = value.d;
+      }
+      sqlite3_result_int64(context, valueInt);
+      return x;
+
+    case ARRAY_TYPE_FLOAT:
+      if (n < 9) {
+        return -1;
+      }
+      value.d = get_u64(&z[1]);
+      sqlite3_result_double(context, value.f);
+      return 9;
+
+    case ARRAY_TYPE_BLOB:
+    case ARRAY_TYPE_TEXT:
+      if (n < 2) {
+        return -1;
+      }
+      x = get_varint(&z[1], &value.d);
+      unsigned char *p = &z[1 + x];
+      x = 1 + x + value.d;
+      if (x < n) {
+        return -1;
+      }
+      if (*z == ARRAY_TYPE_TEXT) {
+        sqlite3_result_text(context, (const char *)p, value.d,
+                            SQLITE_TRANSIENT);
+      } else {
+        sqlite3_result_blob(context, (const char *)p, value.d,
+                            SQLITE_TRANSIENT);
+      }
+      return x;
+  }
+
+  return -1;
+}
+
 void array_func(sqlite3_context *context, int argc, sqlite3_value **argv) {
   if (argc < 1) {
     sqlite3_result_blob(context, NULL, 0, NULL);
@@ -116,54 +249,18 @@ void array_length_func(sqlite3_context *context, int argc,
   }
 
   int n = 0;
-  sqlite3_uint64 nString;
-  for (int i = 0; i < s; i++) {
-    switch (z[i]) {
-      case ARRAY_TYPE_NULL:
-      case ARRAY_TYPE_ZERO:
-      case ARRAY_TYPE_ONE:
-        n++;
-        break;
-
-      case ARRAY_TYPE_INTEGER:
-      case ARRAY_TYPE_INTEGER_NEG:
-        i++;
-        if (!(i < s)) {
-          goto err_malformed;
-        }
-        i += get_varint(&z[i], &nString) - 1;
-        n++;
-        break;
-
-      case ARRAY_TYPE_FLOAT:
-        i += 8;
-        if (!(i < s)) {
-          goto err_malformed;
-        }
-        n++;
-        break;
-
-      case ARRAY_TYPE_BLOB:
-      case ARRAY_TYPE_TEXT:
-        i++;
-        if (!(i < s)) {
-          goto err_malformed;
-        }
-        i += get_varint(&z[i], &nString) - 1;
-        i += nString;
-        n++;
-        break;
-
-      default:
-        goto err_malformed;
+  while (s > 0) {
+    int delta = array_value_advance((unsigned char *)z, s);
+    if (delta == -1) {
+      sqlite3_result_error(context, "malformed array", -1);
+      return;
     }
+    n++;
+    z += delta;
+    s -= delta;
   }
 
   sqlite3_result_int(context, n);
-  return;
-
-err_malformed:
-  sqlite3_result_error(context, "malformed array", -1);
   return;
 }
 
@@ -178,13 +275,18 @@ void array_append_func(sqlite3_context *context, int argc,
   array_buffer buf = {NULL, 0, 0};
 
   int s = sqlite3_value_bytes(argv[0]);
-  unsigned char *z = (unsigned char *)sqlite3_value_blob(argv[0]);
+  const unsigned char *z = (unsigned char *)sqlite3_value_blob(argv[0]);
+  if (!z) {
+    sqlite3_result_error_nomem(context);
+    return;
+  }
 
   int res;
   if (z) {
-    res = array_buffer_append(&buf, z, s);
+    res = array_buffer_append(&buf, (unsigned char *)z, s);
     if (res) {
-      goto err_appendation;
+      sqlite3_result_error(context, "array appendation error", -1);
+      return;
     }
   }
 
@@ -192,15 +294,53 @@ void array_append_func(sqlite3_context *context, int argc,
     res = array_buffer_append_value(&buf, argv[i]);
     if (res) {
       sqlite3_result_error(context, "serialization error", -1);
+      sqlite3_free(buf.buf);
       return;
     }
   }
 
   sqlite3_result_blob(context, buf.buf, buf.len, SQLITE_TRANSIENT);
   sqlite3_free(buf.buf);
+}
+
+void array_at_func(sqlite3_context *context, int argc, sqlite3_value **argv) {
+  UNUSED(argc);
+
+  int s = sqlite3_value_bytes(argv[0]);
+  const unsigned char *z = sqlite3_value_blob(argv[0]);
+  if (!z) {
+    sqlite3_result_error_nomem(context);
+    return;
+  }
+  int i = sqlite3_value_int(argv[1]);
+  if (i < 0) {
+    goto err_oob;
+  }
+
+  int delta;
+  for (int j = 0; j < i; j++) {
+    if (s <= 0) {
+      goto err_oob;
+    }
+    delta = array_value_advance((unsigned char *)z, s);
+    if (delta == -1) {
+      goto err_malformed;
+    }
+    z += delta;
+    s -= delta;
+  }
+
+  delta = array_value_decode(context, (unsigned char *)z, s);
+  if (delta == -1) {
+    goto err_malformed;
+  }
   return;
 
-err_appendation:
-  sqlite3_result_error(context, "array appendation error", -1);
+err_oob:
+  sqlite3_result_error(context, "index out of bounds", -1);
+  return;
+
+err_malformed:
+  sqlite3_result_error(context, "malformed array", -1);
   return;
 }

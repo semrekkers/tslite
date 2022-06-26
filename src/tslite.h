@@ -3,8 +3,9 @@
 
 #include <sqlite3ext.h>
 
-#ifndef TSLITE_MAIN
+#ifdef TSLITE_MAIN
 SQLITE_EXTENSION_INIT1
+extern sqlite3_module array_each_module;
 #else
 SQLITE_EXTENSION_INIT3
 #endif

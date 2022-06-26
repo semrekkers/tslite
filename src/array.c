@@ -1,6 +1,7 @@
 #include "array.h"
 
 #include "array_buffer.h"
+#include "array_each.c"
 
 static int array_buffer_append_value(array_buffer *buf, sqlite3_value *item) {
   int res;

@@ -114,7 +114,7 @@ static int array_value_advance(unsigned char *z, int n) {
       sqlite3_uint64 v;
       x = get_varint(&z[1], &v);
       x = 1 + x + v;
-      if (x < n) {
+      if (n < x) {
         return -1;
       }
       return x;
@@ -202,7 +202,7 @@ static int array_value_decode(sqlite3_context *context, unsigned char *z,
       x = get_varint(&z[1], &value.d);
       unsigned char *p = &z[1 + x];
       x = 1 + x + value.d;
-      if (x < n) {
+      if (n < x) {
         return -1;
       }
       if (*z == ARRAY_TYPE_TEXT) {

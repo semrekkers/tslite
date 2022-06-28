@@ -14,10 +14,12 @@ static int array_each_vtab_connect(sqlite3 *db, void *pAux, int argc,
   array_each_vtab *vtab;
   int rc;
 
-  rc = sqlite3_declare_vtab(db, "CREATE TABLE x(\"index\", value, type)");
+  rc = sqlite3_declare_vtab(
+      db, "CREATE TABLE x(\"index\", value, type, array HIDDEN)");
 #define ARRAY_EACH_VTAB_INDEX 0
 #define ARRAY_EACH_VTAB_VALUE 1
 #define ARRAY_EACH_VTAB_TYPE 2
+#define ARRAY_EACH_VTAB_ARRAY 3
   if (rc != SQLITE_OK) {
     return rc;
   }
@@ -73,6 +75,7 @@ static int array_each_vtab_next(sqlite3_vtab_cursor *cur) {
 static int array_each_vtab_column(sqlite3_vtab_cursor *cur,
                                   sqlite3_context *context, int i) {
   array_each_vtab_cursor *cursor = (array_each_vtab_cursor *)cur;
+  array_each_vtab *vtab = (array_each_vtab *)cursor->base.pVtab;
 
   switch (i) {
     case ARRAY_EACH_VTAB_INDEX:
@@ -95,6 +98,10 @@ static int array_each_vtab_column(sqlite3_vtab_cursor *cur,
       }
       break;
 
+    case ARRAY_EACH_VTAB_ARRAY:
+      sqlite3_result_blob(context, vtab->z, vtab->n, SQLITE_TRANSIENT);
+      break;
+
     default:
       return SQLITE_ERROR;
   }
@@ -114,16 +121,6 @@ static int array_each_vtab_eof(sqlite3_vtab_cursor *cur) {
   return cursor->n <= 0;
 }
 
-static int array_each_vtab_reset(sqlite3_vtab_cursor *cur) {
-  array_each_vtab_cursor *cursor = (array_each_vtab_cursor *)cur;
-  array_each_vtab *vtab = (array_each_vtab *)cursor->base.pVtab;
-
-  cursor->p = vtab->z;
-  cursor->n = vtab->n;
-  cursor->row_id = 0;
-  return SQLITE_OK;
-}
-
 static int array_each_vtab_filter(sqlite3_vtab_cursor *cur, int idxNum,
                                   const char *idxStr, int argc,
                                   sqlite3_value **argv) {
@@ -133,58 +130,46 @@ static int array_each_vtab_filter(sqlite3_vtab_cursor *cur, int idxNum,
   array_each_vtab_cursor *cursor = (array_each_vtab_cursor *)cur;
   array_each_vtab *vtab = (array_each_vtab *)cursor->base.pVtab;
 
-  if (argc != 1) {
-    return SQLITE_ERROR;
+  if (argc < 1) {
+    return SQLITE_OK;
   }
 
-  int s = sqlite3_value_bytes(argv[0]);
-  unsigned char *z = (unsigned char *)sqlite3_value_blob(argv[0]);
+  int n = sqlite3_value_bytes(argv[0]);
+  const void *z = sqlite3_value_blob(argv[0]);
   if (!z) {
     return SQLITE_NOMEM;
   }
 
-  vtab->z = z;
-  vtab->n = s;
-  cursor->p = z;
-  cursor->n = s;
+  vtab->z = (unsigned char *)z;
+  vtab->n = n;
+  cursor->p = (unsigned char *)z;
+  cursor->n = n;
   return SQLITE_OK;
 }
 
-// static int array_each_vtab_best_index(sqlite3_vtab *tab,
-//                                       sqlite3_index_info *pIdxInfo) {
-//   array_each_vtab *vtab = (array_each_vtab *)tab;
-//   double estimate = (double)vtab->n / 46.5;
-//   pIdxInfo->estimatedCost = estimate;
-//   pIdxInfo->estimatedRows = estimate;
-//   return SQLITE_OK;
-// }
-
-static int array_each_vtab_best_index(sqlite3_vtab *tab,
+static int array_each_vtab_best_index(sqlite3_vtab *vtab,
                                       sqlite3_index_info *pIdxInfo) {
-  bool unusable = false;
+  UNUSED(vtab);
+
+  int arrayValueIdx = -1;
   const struct sqlite3_index_constraint *constraint = pIdxInfo->aConstraint;
   for (int i = 0; i < pIdxInfo->nConstraint; i++, constraint++) {
-    if (constraint->usable == 0 ||
-        constraint->op != SQLITE_INDEX_CONSTRAINT_EQ) {
-      unusable = true;
-      break;
+    if (constraint->iColumn == ARRAY_EACH_VTAB_ARRAY) {
+      if (!constraint->usable) {
+        // Unusable constraint on ARRAY, reject the entire plan.
+        return SQLITE_CONSTRAINT;
+      }
+      if (constraint->op == SQLITE_INDEX_CONSTRAINT_EQ) {
+        arrayValueIdx = i;
+      }
     }
   }
-  if (unusable) {
-    // Probably unusable due to multiple calls to
-    // array_each_vtab_best_index (e.g. JOINs).
-    return SQLITE_CONSTRAINT;
-  }
 
-  if (pIdxInfo->nConstraint != 1) {
-    tab->zErrMsg = sqlite3_mprintf("array_each() expects one argument");
-    return SQLITE_ERROR;
+  if (arrayValueIdx >= 0) {
+    pIdxInfo->estimatedCost = 1.0;
+    pIdxInfo->aConstraintUsage[arrayValueIdx].argvIndex = 1;
+    pIdxInfo->aConstraintUsage[arrayValueIdx].omit = 1;
   }
-
-  pIdxInfo->aConstraintUsage[0].argvIndex = 1;
-  pIdxInfo->aConstraintUsage[0].omit = 1;
-  pIdxInfo->estimatedCost = (double)10;
-  pIdxInfo->estimatedRows = 1000;
   return SQLITE_OK;
 }
 

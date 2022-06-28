@@ -200,7 +200,7 @@ __declspec(dllexport)
     return rc;
   }
 
-  rc = sqlite3_create_module(db, "array_each", &array_each_module, 0);
+  rc = sqlite3_create_module(db, "array_each", &array_each_module, NULL);
 
   return rc;
 }

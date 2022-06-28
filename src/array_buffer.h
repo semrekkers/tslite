@@ -27,10 +27,10 @@ static void put_u64(unsigned char *z, sqlite3_uint64 y) {
 }
 
 static sqlite3_uint64 get_u64(unsigned char *z) {
-  return (((sqlite3_uint64)z[0]) | ((sqlite3_uint64)z[1]) << 8 |
-          ((sqlite3_uint64)z[2]) << 16 | ((sqlite3_uint64)z[3]) << 24 |
-          ((sqlite3_uint64)z[4]) << 32 | ((sqlite3_uint64)z[5]) << 40 |
-          ((sqlite3_uint64)z[6]) << 48 | ((sqlite3_uint64)z[7]) << 56);
+  return (((sqlite3_uint64)z[7]) | ((sqlite3_uint64)z[6]) << 8 |
+          ((sqlite3_uint64)z[5]) << 16 | ((sqlite3_uint64)z[4]) << 24 |
+          ((sqlite3_uint64)z[3]) << 32 | ((sqlite3_uint64)z[2]) << 40 |
+          ((sqlite3_uint64)z[1]) << 48 | ((sqlite3_uint64)z[0]) << 56);
 }
 
 // Write a 64-bit variable-length integer to memory starting at p[0].
@@ -265,15 +265,9 @@ static int array_buffer_append_uint64(array_buffer *buf, sqlite3_uint64 v) {
 }
 
 static int array_buffer_append_double(array_buffer *buf, double v) {
-  int res = array_buffer_grow(buf, 8);
-  if (res) {
-    return res;
-  }
   double_rep f64_value;
   f64_value.f = v;
-  put_u64(array_buffer_end(buf), f64_value.d);
-  buf->len += 8;
-  return SQLITE_OK;
+  return array_buffer_append_uint64(buf, f64_value.d);
 }
 
 static int array_buffer_append_varint64(array_buffer *buf, sqlite3_uint64 v) {

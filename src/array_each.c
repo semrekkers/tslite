@@ -3,6 +3,11 @@
 #include "array.h"
 #include "array_buffer.h"
 
+static int array_value_advance(unsigned char *z, int n);
+static const char *array_value_type(unsigned char v);
+static int array_value_decode(sqlite3_context *context, unsigned char *z,
+                              int n);
+
 static int array_each_vtab_connect(sqlite3 *db, void *pAux, int argc,
                                    const char *const *argv,
                                    sqlite3_vtab **ppVtab, char **pzErr) {

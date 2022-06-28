@@ -201,6 +201,13 @@ __declspec(dllexport)
   }
 
   rc = sqlite3_create_module(db, "array_each", &array_each_module, NULL);
+  if (rc != SQLITE_OK) {
+    return rc;
+  }
+
+  rc = sqlite3_create_window_function(
+      db, "array_agg", -1, SQLITE_UTF8, NULL, array_agg_step_func,
+      array_agg_final_func, array_agg_value_func, array_agg_step_func, NULL);
 
   return rc;
 }

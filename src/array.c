@@ -345,3 +345,44 @@ err_malformed:
   sqlite3_result_error(context, "malformed array", -1);
   return;
 }
+
+void array_agg_step_func(sqlite3_context *context, int argc,
+                         sqlite3_value **argv) {
+  if (argc < 1) {
+    return;
+  }
+
+  array_buffer *buf = sqlite3_aggregate_context(context, sizeof(array_buffer));
+  if (!buf) {
+    sqlite3_result_error_nomem(context);
+    return;
+  }
+
+  int rc;
+  for (int i = 0; i < argc; i++) {
+    rc = array_buffer_append_value(buf, argv[i]);
+    if (!rc) {
+      sqlite3_result_error_code(context, rc);
+      return;
+    }
+  }
+}
+
+void array_agg_final_func(sqlite3_context *context) {
+  array_buffer *buf = sqlite3_aggregate_context(context, sizeof(array_buffer));
+  if (!buf) {
+    sqlite3_result_error_nomem(context);
+    return;
+  }
+  sqlite3_result_blob(context, buf->buf, buf->len, SQLITE_TRANSIENT);
+  sqlite3_free(buf->buf);
+}
+
+void array_agg_value_func(sqlite3_context *context) {
+  array_buffer *buf = sqlite3_aggregate_context(context, sizeof(array_buffer));
+  if (!buf) {
+    sqlite3_result_error_nomem(context);
+    return;
+  }
+  sqlite3_result_blob(context, buf->buf, buf->len, SQLITE_TRANSIENT);
+}

@@ -5,15 +5,6 @@
 
 #include "tslite.h"
 
-// Write a 32-bit unsigned integer as 4 big-endian bytes.
-// Source from lsmVarintWrite32 in sqlite3/ext/lsm1/lsm_varint.c
-static void put_u32(unsigned char *z, unsigned int y) {
-  z[0] = (unsigned char)(y >> 24);
-  z[1] = (unsigned char)(y >> 16);
-  z[2] = (unsigned char)(y >> 8);
-  z[3] = (unsigned char)(y);
-}
-
 // Write a 64-bit unsigned integer as 8 big-endian bytes.
 static void put_u64(unsigned char *z, sqlite3_uint64 y) {
   z[0] = (unsigned char)(y >> 56);

@@ -1,8 +1,10 @@
-#include <sqlite3ext.h>
-#include <stddef.h>
-SQLITE_EXTENSION_INIT1
+#define TSLITE_MAIN
 
-#define UNUSED(x) (void)(x)
+#include "tslite.h"
+
+#include <stddef.h>
+
+#include "array.h"
 
 static void interval_func(sqlite3_context *context, int argc,
                           sqlite3_value **argv) {
@@ -166,6 +168,46 @@ __declspec(dllexport)
   rc = sqlite3_create_window_function(
       db, "last_known", 1, SQLITE_UTF8, NULL, last_known_step_func,
       last_known_final_func, last_known_value_func, last_known_step_func, NULL);
+  if (rc != SQLITE_OK) {
+    return rc;
+  }
+
+  rc = sqlite3_create_function(db, "array", -1,
+                               SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL,
+                               array_func, NULL, NULL);
+  if (rc != SQLITE_OK) {
+    return rc;
+  }
+
+  rc = sqlite3_create_function(db, "array_length", 1,
+                               SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL,
+                               array_length_func, NULL, NULL);
+  if (rc != SQLITE_OK) {
+    return rc;
+  }
+
+  rc = sqlite3_create_function(db, "array_append", -1,
+                               SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL,
+                               array_append_func, NULL, NULL);
+  if (rc != SQLITE_OK) {
+    return rc;
+  }
+
+  rc = sqlite3_create_function(db, "array_at", -1,
+                               SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL,
+                               array_at_func, NULL, NULL);
+  if (rc != SQLITE_OK) {
+    return rc;
+  }
+
+  rc = sqlite3_create_module(db, "array_each", &array_each_module, NULL);
+  if (rc != SQLITE_OK) {
+    return rc;
+  }
+
+  rc = sqlite3_create_window_function(
+      db, "array_agg", -1, SQLITE_UTF8, NULL, array_agg_step_func,
+      array_agg_final_func, array_agg_value_func, array_agg_step_func, NULL);
 
   return rc;
 }

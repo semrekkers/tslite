@@ -1,12 +1,14 @@
-HEADERS = 
-SOURCE  = src/tslite.c
+HEADERS = src/array.h
+SOURCE  = src/array.c src/tslite.c
 
 .PHONY: all
-all: tslite.so
+all:
+	$(MAKE) -C src
 
-tslite.so: $(SOURCE)
-	gcc -g -fPIC -O2 -Wall -Wextra -shared $(SOURCE) -o tslite.so
+.PHONY: debug
+debug:
+	$(MAKE) -C src debug
 
 .PHONY: clean
 clean:
-	rm -rf src/*.o tslite.so
+	rm -rf src/*.o src/*.so

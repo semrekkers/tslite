@@ -21,6 +21,7 @@ static int array_each_vtab_connect(sqlite3 *db, void *pAux, int argc,
 
   rc = sqlite3_declare_vtab(
       db, "CREATE TABLE x(\"index\", value, type, array HIDDEN)");
+#define ARRAY_EACH_VTAB_ROWID -1
 #define ARRAY_EACH_VTAB_INDEX 0
 #define ARRAY_EACH_VTAB_VALUE 1
 #define ARRAY_EACH_VTAB_TYPE 2
@@ -77,6 +78,20 @@ static int array_each_vtab_next(sqlite3_vtab_cursor *cur) {
   return SQLITE_OK;
 }
 
+static void array_each_vtab_advance(array_each_vtab_cursor *cur, int n) {
+  int delta;
+  for (int i = 0; i < n; i++) {
+    delta = array_value_advance(cur->p, cur->n);
+    if (delta == -1) {
+      cur->n = 0;
+      return;
+    }
+    cur->p += delta;
+    cur->n -= delta;
+    cur->row_id++;
+  }
+}
+
 static int array_each_vtab_column(sqlite3_vtab_cursor *cur,
                                   sqlite3_context *context, int i) {
   array_each_vtab_cursor *cursor = (array_each_vtab_cursor *)cur;
@@ -129,7 +144,6 @@ static int array_each_vtab_eof(sqlite3_vtab_cursor *cur) {
 static int array_each_vtab_filter(sqlite3_vtab_cursor *cur, int idxNum,
                                   const char *idxStr, int argc,
                                   sqlite3_value **argv) {
-  UNUSED(idxNum);
   UNUSED(idxStr);
 
   array_each_vtab_cursor *cursor = (array_each_vtab_cursor *)cur;
@@ -149,6 +163,18 @@ static int array_each_vtab_filter(sqlite3_vtab_cursor *cur, int idxNum,
   vtab->n = n;
   cursor->p = (unsigned char *)z;
   cursor->n = n;
+
+  if (argc == 2) {
+    int i = sqlite3_value_int(argv[1]);
+    if (idxNum == SQLITE_INDEX_CONSTRAINT_GT) {
+      i++;
+    }
+    array_each_vtab_advance(cursor, i);
+    if (idxNum == SQLITE_INDEX_CONSTRAINT_EQ) {
+      cursor->n = array_value_advance(cursor->p, cursor->n);
+    }
+  }
+
   return SQLITE_OK;
 }
 
@@ -157,6 +183,8 @@ static int array_each_vtab_best_index(sqlite3_vtab *vtab,
   UNUSED(vtab);
 
   int arrayValueIdx = -1;
+  int arrayOffsetIdx = -1;
+  int indexConstraint = 0;
   const struct sqlite3_index_constraint *constraint = pIdxInfo->aConstraint;
   for (int i = 0; i < pIdxInfo->nConstraint; i++, constraint++) {
     if (constraint->iColumn == ARRAY_EACH_VTAB_ARRAY) {
@@ -168,12 +196,59 @@ static int array_each_vtab_best_index(sqlite3_vtab *vtab,
         arrayValueIdx = i;
       }
     }
+    if ((constraint->iColumn == ARRAY_EACH_VTAB_INDEX ||
+         constraint->iColumn == ARRAY_EACH_VTAB_ROWID) &&
+        constraint->usable) {
+      switch (constraint->op) {
+        case SQLITE_INDEX_CONSTRAINT_EQ:
+          if (indexConstraint == SQLITE_INDEX_CONSTRAINT_EQ) {
+            // Multiple EQ, so reset.
+            arrayOffsetIdx = -1;
+            continue;
+          }
+          break;
+
+        case SQLITE_INDEX_CONSTRAINT_GT:
+        case SQLITE_INDEX_CONSTRAINT_GE:
+          // TODO: case SQLITE_INDEX_CONSTRAINT_OFFSET:
+          if (arrayOffsetIdx != -1 &&
+              indexConstraint < SQLITE_INDEX_CONSTRAINT_GT) {
+            continue;
+          }
+          break;
+
+        default:
+          continue;
+      }
+      arrayOffsetIdx = i;
+      indexConstraint = constraint->op;
+    }
   }
 
   if (arrayValueIdx >= 0) {
-    pIdxInfo->estimatedCost = 1.0;
+    pIdxInfo->estimatedCost = 1.5;
     pIdxInfo->aConstraintUsage[arrayValueIdx].argvIndex = 1;
     pIdxInfo->aConstraintUsage[arrayValueIdx].omit = 1;
+
+    if (arrayOffsetIdx >= 0) {
+      pIdxInfo->estimatedCost = 0.5;
+      pIdxInfo->aConstraintUsage[arrayOffsetIdx].argvIndex = 2;
+      // pIdxInfo->aConstraintUsage[arrayOffsetIdx].omit = 1;
+      pIdxInfo->idxNum = indexConstraint;
+      if (indexConstraint == SQLITE_INDEX_CONSTRAINT_EQ) {
+        pIdxInfo->idxFlags |= SQLITE_INDEX_SCAN_UNIQUE;
+        pIdxInfo->estimatedCost = 0.005;
+      }
+    }
+
+    if (pIdxInfo->nOrderBy == 1) {
+      struct sqlite3_index_orderby orderBy = pIdxInfo->aOrderBy[0];
+      if (!orderBy.desc && (orderBy.iColumn == ARRAY_EACH_VTAB_ROWID ||
+                            orderBy.iColumn == ARRAY_EACH_VTAB_INDEX)) {
+        pIdxInfo->orderByConsumed = true;
+        pIdxInfo->estimatedCost /= 2;
+      }
+    }
   }
   return SQLITE_OK;
 }

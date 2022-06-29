@@ -1,5 +1,7 @@
 # tslite
 
+🚧 Work in progress
+
 This extension module for SQLite provides extra functionality for timeseries data. 
 
 Four functionalities are yet implemented:

@@ -233,8 +233,9 @@ static int array_each_vtab_best_index(sqlite3_vtab *vtab,
     if (arrayOffsetIdx >= 0) {
       pIdxInfo->estimatedCost = 0.5;
       pIdxInfo->aConstraintUsage[arrayOffsetIdx].argvIndex = 2;
-      // pIdxInfo->aConstraintUsage[arrayOffsetIdx].omit = 1;
+      pIdxInfo->aConstraintUsage[arrayOffsetIdx].omit = 1;
       pIdxInfo->idxNum = indexConstraint;
+
       if (indexConstraint == SQLITE_INDEX_CONSTRAINT_EQ) {
         pIdxInfo->idxFlags |= SQLITE_INDEX_SCAN_UNIQUE;
         pIdxInfo->estimatedCost = 0.005;

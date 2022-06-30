@@ -22,7 +22,6 @@ void array_at_func(sqlite3_context *context, int argc, sqlite3_value **argv);
 void array_agg_step_func(sqlite3_context *context, int argc,
                          sqlite3_value **argv);
 void array_agg_final_func(sqlite3_context *context);
-void array_agg_value_func(sqlite3_context *context);
 
 typedef struct {
   sqlite3_vtab base;

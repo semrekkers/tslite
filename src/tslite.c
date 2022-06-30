@@ -448,9 +448,9 @@ __declspec(dllexport)
     return rc;
   }
 
-  rc = sqlite3_create_window_function(
-      db, "array_agg", -1, SQLITE_UTF8, NULL, array_agg_step_func,
-      array_agg_final_func, array_agg_value_func, noop_step_func, NULL);
+  rc = sqlite3_create_window_function(db, "array_agg", -1, SQLITE_UTF8, NULL,
+                                      array_agg_step_func, array_agg_final_func,
+                                      NULL, NULL, NULL);
 
   return rc;
 }

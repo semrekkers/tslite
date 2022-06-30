@@ -377,12 +377,3 @@ void array_agg_final_func(sqlite3_context *context) {
   sqlite3_result_blob(context, buf->buf, buf->len, SQLITE_TRANSIENT);
   sqlite3_free(buf->buf);
 }
-
-void array_agg_value_func(sqlite3_context *context) {
-  array_buffer *buf = sqlite3_aggregate_context(context, sizeof(array_buffer));
-  if (!buf) {
-    sqlite3_result_error_nomem(context);
-    return;
-  }
-  sqlite3_result_blob(context, buf->buf, buf->len, SQLITE_TRANSIENT);
-}

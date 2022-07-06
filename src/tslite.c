@@ -88,265 +88,70 @@ static void lerp_func(sqlite3_context *context, int argc,
 
   sqlite3_int64 a_ts = sqlite3_value_int64(argv[0]);
   double a_value = sqlite3_value_double(argv[1]);
-  sqlite3_int64 norm_b_ts = sqlite3_value_int64(argv[2]) - a_ts;
+  double norm_b_ts = (double)(sqlite3_value_int64(argv[2]) - a_ts);
   double b_value = sqlite3_value_double(argv[3]);
-  sqlite3_int64 norm_t = sqlite3_value_int64(argv[4]) - a_ts;
+  double norm_t = (double)(sqlite3_value_int64(argv[4]) - a_ts);
 
-  double res =
-      a_value + ((double)norm_t / (double)norm_b_ts) * (b_value - a_value);
-
-  sqlite3_result_double(context, res);
+  sqlite3_result_double(context,
+                        a_value + (norm_t / norm_b_ts) * (b_value - a_value));
 }
+
+typedef struct {
+  sqlite3_int64 windowSize, relIndex;
+  sqlite3_value *last;
+} locf_context;
 
 static void locf_step_func(sqlite3_context *context, int argc,
                            sqlite3_value **argv) {
-  if (argc < 1) {
-    sqlite3_result_error(context,
-                         "too few arguments to locf() - need at least 1", -1);
-    return;
-  }
-  sqlite3_value **last =
-      sqlite3_aggregate_context(context, sizeof(sqlite3_value *));
-  if (!last) {
+  UNUSED(argc);
+
+  locf_context *locf = sqlite3_aggregate_context(context, sizeof(locf_context));
+  if (!locf) {
     sqlite3_result_error_nomem(context);
     return;
   }
 
-  if (sqlite3_value_type(argv[0]) == SQLITE_NULL) {
-    if (!(*last) && argc >= 2) {
-      *last = sqlite3_value_dup(argv[1]);
-    }
-    return;
+  if (sqlite3_value_type(argv[0]) != SQLITE_NULL) {
+    locf->last = sqlite3_value_dup(argv[0]);
+    locf->relIndex = locf->windowSize;
   }
 
-  if (*last) {
-    sqlite3_value_free(*last);
-  }
-  *last = sqlite3_value_dup(argv[0]);
+  locf->windowSize++;
 }
 
-static void locf_final_func(sqlite3_context *context) {
-  sqlite3_value **last =
-      sqlite3_aggregate_context(context, sizeof(sqlite3_value *));
-  if (!last) {
-    sqlite3_result_error_nomem(context);
-    return;
-  }
+static void locf_inverse_func(sqlite3_context *context, int argc,
+                              sqlite3_value **argv) {
+  UNUSED(argc);
+  UNUSED(argv);
 
-  if (!(*last)) {
-    sqlite3_result_null(context);
-  } else {
-    sqlite3_result_value(context, *last);
-    sqlite3_value_free(*last);
+  locf_context *locf = sqlite3_aggregate_context(context, sizeof(locf_context));
+
+  locf->relIndex--;
+  locf->windowSize--;
+  if (locf->relIndex < 0 && locf->last) {
+    sqlite3_value_free(locf->last);
+    locf->last = NULL;
   }
 }
 
 static void locf_value_func(sqlite3_context *context) {
-  sqlite3_value **last =
-      sqlite3_aggregate_context(context, sizeof(sqlite3_value *));
+  locf_context *locf = sqlite3_aggregate_context(context, sizeof(locf_context));
 
-  if (!(*last)) {
+  if (!locf || !locf->last) {
     sqlite3_result_null(context);
   } else {
-    sqlite3_result_value(context, *last);
+    sqlite3_result_value(context, locf->last);
   }
 }
 
-typedef struct {
-  double first, delta;
-  bool valid;
-} delta_context;
+static void locf_final_func(sqlite3_context *context) {
+  locf_context *locf = sqlite3_aggregate_context(context, sizeof(locf_context));
 
-static void delta_step_func(sqlite3_context *context, int argc,
-                            sqlite3_value **argv) {
-  if (argc < 1) {
-    sqlite3_result_error(context,
-                         "too few arguments to delta() - need at least 1", -1);
-    return;
-  }
-  delta_context *delta =
-      sqlite3_aggregate_context(context, sizeof(delta_context));
-  if (!delta) {
-    sqlite3_result_error_nomem(context);
-    return;
-  }
-
-  if (sqlite3_value_type(argv[0]) == SQLITE_NULL) {
-    return;
-  }
-  double value = sqlite3_value_double(argv[0]);
-  if (!delta->valid) {
-    delta->first = value;
-    delta->valid = true;
-    return;
-  }
-  double tolerance = 0;
-  if (argc >= 2) {
-    tolerance = sqlite3_value_double(argv[1]);
-  }
-  value = delta->first - value;
-  if (fabs(value) > tolerance) {
-    delta->delta = value;
-  }
-}
-
-static void delta_final_func(sqlite3_context *context) {
-  delta_context *delta =
-      sqlite3_aggregate_context(context, sizeof(delta_context));
-  if (!delta) {
-    sqlite3_result_error_nomem(context);
-    return;
-  }
-
-  if (delta->valid) {
-    sqlite3_result_double(context, delta->delta);
-  } else {
+  if (!locf || !locf->last) {
     sqlite3_result_null(context);
-  }
-}
-
-static void delta_value_func(sqlite3_context *context) {
-  delta_context *delta =
-      sqlite3_aggregate_context(context, sizeof(delta_context));
-
-  if (delta->valid) {
-    sqlite3_result_double(context, delta->delta);
   } else {
-    sqlite3_result_null(context);
-  }
-}
-
-typedef struct {
-  sqlite3_int64 changes;
-  double prev;
-  bool valid;
-} num_changes_context;
-
-static void num_changes_step_func(sqlite3_context *context, int argc,
-                                  sqlite3_value **argv) {
-  if (argc < 1) {
-    sqlite3_result_error(
-        context, "too few arguments to num_changes() - need at least 1", -1);
-    return;
-  }
-  num_changes_context *num_changes =
-      sqlite3_aggregate_context(context, sizeof(num_changes_context));
-  if (!num_changes) {
-    sqlite3_result_error_nomem(context);
-    return;
-  }
-
-  if (sqlite3_value_type(argv[0]) == SQLITE_NULL) {
-    return;
-  }
-  double value = sqlite3_value_double(argv[0]);
-  if (!num_changes->valid) {
-    num_changes->prev = value;
-    num_changes->valid = true;
-    return;
-  }
-  double tolerance = 0;
-  if (argc >= 2) {
-    tolerance = sqlite3_value_double(argv[1]);
-  }
-  double delta = num_changes->prev - value;
-  if (fabs(delta) > tolerance) {
-    num_changes->prev = value;
-    num_changes->changes++;
-  }
-}
-
-static void num_changes_final_func(sqlite3_context *context) {
-  num_changes_context *num_changes =
-      sqlite3_aggregate_context(context, sizeof(num_changes_context));
-  if (!num_changes) {
-    sqlite3_result_error_nomem(context);
-    return;
-  }
-
-  if (num_changes->valid) {
-    sqlite3_result_int64(context, num_changes->changes);
-  } else {
-    sqlite3_result_null(context);
-  }
-}
-
-static void num_changes_value_func(sqlite3_context *context) {
-  num_changes_context *num_changes =
-      sqlite3_aggregate_context(context, sizeof(num_changes_context));
-
-  if (num_changes->valid) {
-    sqlite3_result_int64(context, num_changes->changes);
-  } else {
-    sqlite3_result_null(context);
-  }
-}
-
-typedef struct {
-  double prev;
-  bool ticked;
-  bool valid;
-} tick_changes_context;
-
-static void tick_changes_step_func(sqlite3_context *context, int argc,
-                                   sqlite3_value **argv) {
-  if (argc < 1) {
-    sqlite3_result_error(
-        context, "too few arguments to tick_changes() - need at least 1", -1);
-    return;
-  }
-  tick_changes_context *tick_changes =
-      sqlite3_aggregate_context(context, sizeof(tick_changes_context));
-  if (!tick_changes) {
-    sqlite3_result_error_nomem(context);
-    return;
-  }
-
-  if (sqlite3_value_type(argv[0]) == SQLITE_NULL) {
-    return;
-  }
-  double value = sqlite3_value_double(argv[0]);
-  if (!tick_changes->valid) {
-    tick_changes->prev = value;
-    tick_changes->valid = true;
-    return;
-  }
-  double tolerance = 0;
-  if (argc >= 2) {
-    tolerance = sqlite3_value_double(argv[1]);
-  }
-  double delta = tick_changes->prev - value;
-  if (fabs(delta) > tolerance) {
-    tick_changes->prev = value;
-    tick_changes->ticked = true;
-  } else {
-    tick_changes->ticked = false;
-  }
-}
-
-static void tick_changes_final_func(sqlite3_context *context) {
-  tick_changes_context *tick_changes =
-      sqlite3_aggregate_context(context, sizeof(tick_changes_context));
-  if (!tick_changes) {
-    sqlite3_result_error_nomem(context);
-    return;
-  }
-
-  if (tick_changes->valid) {
-    sqlite3_result_int(context, tick_changes->ticked);
-  } else {
-    sqlite3_result_null(context);
-  }
-}
-
-static void tick_changes_value_func(sqlite3_context *context) {
-  tick_changes_context *tick_changes =
-      sqlite3_aggregate_context(context, sizeof(tick_changes_context));
-
-  if (tick_changes->valid) {
-    sqlite3_result_int(context, tick_changes->ticked);
-  } else {
-    sqlite3_result_null(context);
+    sqlite3_result_value(context, locf->last);
+    sqlite3_value_free(locf->last);
   }
 }
 
@@ -378,7 +183,7 @@ static void cond_count_step_func(sqlite3_context *context, int argc,
   } else {
     // Initialize cond_count.
     cond_count->condition = value;
-    cond_count->count++;
+    cond_count->count = 1;
   }
 }
 
@@ -393,7 +198,7 @@ static void cond_count_inverse_func(sqlite3_context *context, int argc,
     return;
   }
   sqlite3_int64 value = sqlite3_value_int64(argv[0]);
-  if (cond_count->count > 1 && value != cond_count->condition) {
+  if (cond_count->count > 1 && value == cond_count->condition) {
     cond_count->count--;
   }
 }
@@ -406,14 +211,7 @@ static void cond_count_value_func(sqlite3_context *context) {
     return;
   }
   // Count == 0 means initialized, but cond_count starts at 0, so minus 1.
-  sqlite3_result_int(context, cond_count->count - 1);
-}
-
-static void noop_step_func(sqlite3_context *context, int argc,
-                           sqlite3_value **argv) {
-  UNUSED(context);
-  UNUSED(argc);
-  UNUSED(argv);
+  sqlite3_result_int64(context, cond_count->count - 1);
 }
 
 #ifdef _WIN32
@@ -448,28 +246,7 @@ __declspec(dllexport)
 
   rc = sqlite3_create_window_function(db, "locf", -1, SQLITE_UTF8, NULL,
                                       locf_step_func, locf_final_func,
-                                      locf_value_func, noop_step_func, NULL);
-  if (rc != SQLITE_OK) {
-    return rc;
-  }
-
-  rc = sqlite3_create_window_function(db, "delta", -1, SQLITE_UTF8, NULL,
-                                      delta_step_func, delta_final_func,
-                                      delta_value_func, noop_step_func, NULL);
-  if (rc != SQLITE_OK) {
-    return rc;
-  }
-
-  rc = sqlite3_create_window_function(
-      db, "num_changes", -1, SQLITE_UTF8, NULL, num_changes_step_func,
-      num_changes_final_func, num_changes_value_func, noop_step_func, NULL);
-  if (rc != SQLITE_OK) {
-    return rc;
-  }
-
-  rc = sqlite3_create_window_function(
-      db, "tick_changes", -1, SQLITE_UTF8, NULL, tick_changes_step_func,
-      tick_changes_final_func, tick_changes_value_func, noop_step_func, NULL);
+                                      locf_value_func, locf_inverse_func, NULL);
   if (rc != SQLITE_OK) {
     return rc;
   }

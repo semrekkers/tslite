@@ -351,17 +351,16 @@ static void tick_changes_value_func(sqlite3_context *context) {
 }
 
 typedef struct {
-  sqlite3_int64 count, prev;
-  bool valid;
-} group_count_context;
+  sqlite3_int64 count, condition;
+} cond_count_context;
 
-static void group_count_step_func(sqlite3_context *context, int argc,
-                                  sqlite3_value **argv) {
+static void cond_count_step_func(sqlite3_context *context, int argc,
+                                 sqlite3_value **argv) {
   UNUSED(argc);
 
-  group_count_context *group_count =
-      sqlite3_aggregate_context(context, sizeof(group_count_context));
-  if (!group_count) {
+  cond_count_context *cond_count =
+      sqlite3_aggregate_context(context, sizeof(cond_count_context));
+  if (!cond_count) {
     sqlite3_result_error_nomem(context);
     return;
   }
@@ -370,57 +369,44 @@ static void group_count_step_func(sqlite3_context *context, int argc,
     return;
   }
   sqlite3_int64 value = sqlite3_value_int64(argv[0]);
-  if (group_count->valid) {
-    if (value != group_count->prev) {
-      group_count->prev = value;
-      group_count->count++;
+  if (cond_count->count) {
+    if (value != cond_count->condition) {
+      // Condition changed, increment counter.
+      cond_count->condition = value;
+      cond_count->count++;
     }
   } else {
-    group_count->prev = value;
-    group_count->valid = true;
+    // Initialize cond_count.
+    cond_count->condition = value;
+    cond_count->count++;
   }
 }
 
-static void group_count_inverse_func(sqlite3_context *context, int argc,
-                                     sqlite3_value **argv) {
+static void cond_count_inverse_func(sqlite3_context *context, int argc,
+                                    sqlite3_value **argv) {
   UNUSED(argc);
 
-  group_count_context *group_count =
-      sqlite3_aggregate_context(context, sizeof(group_count_context));
+  cond_count_context *cond_count =
+      sqlite3_aggregate_context(context, sizeof(cond_count_context));
 
-  if (sqlite3_value_type(argv[0]) == SQLITE_NULL) {
+  if (sqlite3_value_type(argv[0]) == SQLITE_NULL || !cond_count->count) {
     return;
   }
   sqlite3_int64 value = sqlite3_value_int64(argv[0]);
-  if (group_count->valid && value != group_count->prev) {
-    group_count->count--;
+  if (cond_count->count > 1 && value != cond_count->condition) {
+    cond_count->count--;
   }
 }
 
-static void group_count_final_func(sqlite3_context *context) {
-  group_count_context *group_count =
-      sqlite3_aggregate_context(context, sizeof(group_count_context));
-  if (!group_count) {
-    sqlite3_result_error_nomem(context);
+static void cond_count_value_func(sqlite3_context *context) {
+  cond_count_context *cond_count =
+      sqlite3_aggregate_context(context, sizeof(cond_count_context));
+  if (!cond_count || !cond_count->count) {
+    sqlite3_result_null(context);
     return;
   }
-
-  if (group_count->valid) {
-    sqlite3_result_int64(context, group_count->count);
-  } else {
-    sqlite3_result_null(context);
-  }
-}
-
-static void group_count_value_func(sqlite3_context *context) {
-  group_count_context *group_count =
-      sqlite3_aggregate_context(context, sizeof(group_count_context));
-
-  if (group_count->valid) {
-    sqlite3_result_int64(context, group_count->count);
-  } else {
-    sqlite3_result_null(context);
-  }
+  // Count == 0 means initialized, but cond_count starts at 0, so minus 1.
+  sqlite3_result_int(context, cond_count->count - 1);
 }
 
 static void noop_step_func(sqlite3_context *context, int argc,
@@ -489,8 +475,8 @@ __declspec(dllexport)
   }
 
   rc = sqlite3_create_window_function(
-      db, "group_count", 1, SQLITE_UTF8, NULL, group_count_step_func,
-      group_count_final_func, group_count_value_func, group_count_inverse_func,
+      db, "cond_count", 1, SQLITE_UTF8, NULL, cond_count_step_func,
+      cond_count_value_func, cond_count_value_func, cond_count_inverse_func,
       NULL);
   if (rc != SQLITE_OK) {
     return rc;

@@ -350,6 +350,79 @@ static void tick_changes_value_func(sqlite3_context *context) {
   }
 }
 
+typedef struct {
+  sqlite3_int64 count, prev;
+  bool valid;
+} group_count_context;
+
+static void group_count_step_func(sqlite3_context *context, int argc,
+                                  sqlite3_value **argv) {
+  UNUSED(argc);
+
+  group_count_context *group_count =
+      sqlite3_aggregate_context(context, sizeof(group_count_context));
+  if (!group_count) {
+    sqlite3_result_error_nomem(context);
+    return;
+  }
+
+  if (sqlite3_value_type(argv[0]) == SQLITE_NULL) {
+    return;
+  }
+  sqlite3_int64 value = sqlite3_value_int64(argv[0]);
+  if (group_count->valid) {
+    if (value != group_count->prev) {
+      group_count->prev = value;
+      group_count->count++;
+    }
+  } else {
+    group_count->prev = value;
+    group_count->valid = true;
+  }
+}
+
+static void group_count_inverse_func(sqlite3_context *context, int argc,
+                                     sqlite3_value **argv) {
+  UNUSED(argc);
+
+  group_count_context *group_count =
+      sqlite3_aggregate_context(context, sizeof(group_count_context));
+
+  if (sqlite3_value_type(argv[0]) == SQLITE_NULL) {
+    return;
+  }
+  sqlite3_int64 value = sqlite3_value_int64(argv[0]);
+  if (group_count->valid && value != group_count->prev) {
+    group_count->count--;
+  }
+}
+
+static void group_count_final_func(sqlite3_context *context) {
+  group_count_context *group_count =
+      sqlite3_aggregate_context(context, sizeof(group_count_context));
+  if (!group_count) {
+    sqlite3_result_error_nomem(context);
+    return;
+  }
+
+  if (group_count->valid) {
+    sqlite3_result_int64(context, group_count->count);
+  } else {
+    sqlite3_result_null(context);
+  }
+}
+
+static void group_count_value_func(sqlite3_context *context) {
+  group_count_context *group_count =
+      sqlite3_aggregate_context(context, sizeof(group_count_context));
+
+  if (group_count->valid) {
+    sqlite3_result_int64(context, group_count->count);
+  } else {
+    sqlite3_result_null(context);
+  }
+}
+
 static void noop_step_func(sqlite3_context *context, int argc,
                            sqlite3_value **argv) {
   UNUSED(context);
@@ -411,6 +484,14 @@ __declspec(dllexport)
   rc = sqlite3_create_window_function(
       db, "tick_changes", -1, SQLITE_UTF8, NULL, tick_changes_step_func,
       tick_changes_final_func, tick_changes_value_func, noop_step_func, NULL);
+  if (rc != SQLITE_OK) {
+    return rc;
+  }
+
+  rc = sqlite3_create_window_function(
+      db, "group_count", 1, SQLITE_UTF8, NULL, group_count_step_func,
+      group_count_final_func, group_count_value_func, group_count_inverse_func,
+      NULL);
   if (rc != SQLITE_OK) {
     return rc;
   }

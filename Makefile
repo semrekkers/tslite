@@ -11,4 +11,4 @@ debug:
 
 .PHONY: clean
 clean:
-	rm -rf src/*.o src/*.so
+	rm -rvf src/*.o src/*.so

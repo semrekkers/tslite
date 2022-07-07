@@ -86,14 +86,18 @@ static void lerp_func(sqlite3_context *context, int argc,
                       sqlite3_value **argv) {
   UNUSED(argc);
 
+  double res;
   sqlite3_int64 a_ts = sqlite3_value_int64(argv[0]);
   double a_value = sqlite3_value_double(argv[1]);
   double norm_b_ts = (double)(sqlite3_value_int64(argv[2]) - a_ts);
-  double b_value = sqlite3_value_double(argv[3]);
-  double norm_t = (double)(sqlite3_value_int64(argv[4]) - a_ts);
-
-  sqlite3_result_double(context,
-                        a_value + (norm_t / norm_b_ts) * (b_value - a_value));
+  if (norm_b_ts == 0) {
+    res = a_value;
+  } else {
+    double b_value = sqlite3_value_double(argv[3]);
+    double norm_t = (double)(sqlite3_value_int64(argv[4]) - a_ts);
+    res = a_value + (norm_t / norm_b_ts) * (b_value - a_value);
+  }
+  sqlite3_result_double(context, res);
 }
 
 typedef struct {
@@ -156,16 +160,16 @@ static void locf_final_func(sqlite3_context *context) {
 }
 
 typedef struct {
-  sqlite3_int64 count, condition;
-} cond_count_context;
+  sqlite3_int64 count, last;
+} change_count_context;
 
-static void cond_count_step_func(sqlite3_context *context, int argc,
-                                 sqlite3_value **argv) {
+static void change_count_step_func(sqlite3_context *context, int argc,
+                                   sqlite3_value **argv) {
   UNUSED(argc);
 
-  cond_count_context *cond_count =
-      sqlite3_aggregate_context(context, sizeof(cond_count_context));
-  if (!cond_count) {
+  change_count_context *change_count =
+      sqlite3_aggregate_context(context, sizeof(change_count_context));
+  if (!change_count) {
     sqlite3_result_error_nomem(context);
     return;
   }
@@ -174,44 +178,32 @@ static void cond_count_step_func(sqlite3_context *context, int argc,
     return;
   }
   sqlite3_int64 value = sqlite3_value_int64(argv[0]);
-  if (cond_count->count) {
-    if (value != cond_count->condition) {
-      // Condition changed, increment counter.
-      cond_count->condition = value;
-      cond_count->count++;
+  if (change_count->count) {
+    if (value != change_count->last) {
+      change_count->last = value;
+      change_count->count++;
     }
   } else {
-    // Initialize cond_count.
-    cond_count->condition = value;
-    cond_count->count = 1;
+    change_count->last = value;
+    change_count->count = 1;
   }
 }
 
-static void cond_count_inverse_func(sqlite3_context *context, int argc,
-                                    sqlite3_value **argv) {
-  UNUSED(argc);
-
-  cond_count_context *cond_count =
-      sqlite3_aggregate_context(context, sizeof(cond_count_context));
-
-  if (sqlite3_value_type(argv[0]) == SQLITE_NULL || !cond_count->count) {
-    return;
-  }
-  sqlite3_int64 value = sqlite3_value_int64(argv[0]);
-  if (cond_count->count > 1 && value == cond_count->condition) {
-    cond_count->count--;
-  }
-}
-
-static void cond_count_value_func(sqlite3_context *context) {
-  cond_count_context *cond_count =
-      sqlite3_aggregate_context(context, sizeof(cond_count_context));
-  if (!cond_count || !cond_count->count) {
+static void change_count_value_func(sqlite3_context *context) {
+  change_count_context *change_count =
+      sqlite3_aggregate_context(context, sizeof(change_count_context));
+  if (!change_count) {
     sqlite3_result_null(context);
     return;
   }
-  // Count == 0 means initialized, but cond_count starts at 0, so minus 1.
-  sqlite3_result_int64(context, cond_count->count - 1);
+  sqlite3_result_int64(context, change_count->count);
+}
+
+static void noop_step_func(sqlite3_context *context, int argc,
+                           sqlite3_value **argv) {
+  UNUSED(context);
+  UNUSED(argc);
+  UNUSED(argv);
 }
 
 #ifdef _WIN32
@@ -223,28 +215,29 @@ __declspec(dllexport)
 
   SQLITE_EXTENSION_INIT2(pApi);
 
-  int rc = sqlite3_create_function(db, "interval", 1,
-                                   SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL,
-                                   interval_func, NULL, NULL);
+  int rc = sqlite3_create_function(
+      db, "interval", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC | SQLITE_INNOCUOUS,
+      NULL, interval_func, NULL, NULL);
   if (rc != SQLITE_OK) {
     return rc;
   }
 
-  rc = sqlite3_create_function(db, "time_bucket", -1,
-                               SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL,
-                               time_bucket_func, NULL, NULL);
+  rc = sqlite3_create_function(
+      db, "time_bucket", -1,
+      SQLITE_UTF8 | SQLITE_DETERMINISTIC | SQLITE_INNOCUOUS, NULL,
+      time_bucket_func, NULL, NULL);
   if (rc != SQLITE_OK) {
     return rc;
   }
 
-  rc =
-      sqlite3_create_function(db, "lerp", 5, SQLITE_UTF8 | SQLITE_DETERMINISTIC,
-                              NULL, lerp_func, NULL, NULL);
+  rc = sqlite3_create_function(
+      db, "lerp", 5, SQLITE_UTF8 | SQLITE_DETERMINISTIC | SQLITE_INNOCUOUS,
+      NULL, lerp_func, NULL, NULL);
   if (rc != SQLITE_OK) {
     return rc;
   }
 
-  rc = sqlite3_create_window_function(db, "locf", -1, SQLITE_UTF8, NULL,
+  rc = sqlite3_create_window_function(db, "locf", 1, SQLITE_UTF8, NULL,
                                       locf_step_func, locf_final_func,
                                       locf_value_func, locf_inverse_func, NULL);
   if (rc != SQLITE_OK) {
@@ -252,9 +245,8 @@ __declspec(dllexport)
   }
 
   rc = sqlite3_create_window_function(
-      db, "cond_count", 1, SQLITE_UTF8, NULL, cond_count_step_func,
-      cond_count_value_func, cond_count_value_func, cond_count_inverse_func,
-      NULL);
+      db, "change_count", 1, SQLITE_UTF8, NULL, change_count_step_func,
+      change_count_value_func, change_count_value_func, noop_step_func, NULL);
   if (rc != SQLITE_OK) {
     return rc;
   }

@@ -2,44 +2,83 @@
 
 #include "tslite.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
 
 #include "array.h"
 
+static void noop_step_func(sqlite3_context *context, int argc,
+                           sqlite3_value **argv);
+static int strpluraleql(const unsigned char *str, const char *substr);
+
 static void interval_func(sqlite3_context *context, int argc,
                           sqlite3_value **argv) {
   UNUSED(argc);
 
   const unsigned char *str = sqlite3_value_text(argv[0]);
-  int res = 0;
-  int acc = 0;
+  int res = 0, acc = 0;
+  int substr;
 
   while (*str) {
-    if (*str >= 0x80 || *str == ' ' || *str == '\t') {
-      // Ignore unicode, spaces and tabs.
+    if (*str >= 0x80 || *str == ' ' || *str == '\t' || *str == '\n') {
+      // Ignore unicode (UTF-8), spaces, tabs and newlines.
       str++;
       continue;
     }
     switch (*str) {
+      // Second, seconds or 's'
       case 's':
+      case 'S':
+        substr = strpluraleql(str + 1, "econd");
+        if (substr) {
+          str += substr;
+        }
         res += acc;
         acc = 0;
         break;
+
+      // Minute, minutes or 'm'
       case 'm':
+      case 'M':
+        substr = strpluraleql(str + 1, "inute");
+        if (substr) {
+          str += substr;
+        }
         res += acc * 60;
         acc = 0;
         break;
+
+      // Hour, hours or 'h'
       case 'h':
+      case 'H':
+        substr = strpluraleql(str + 1, "our");
+        if (substr) {
+          str += substr;
+        }
         res += acc * 60 * 60;
         acc = 0;
         break;
+
+      // Day, days or 'd'
       case 'd':
+      case 'D':
+        substr = strpluraleql(str + 1, "ay");
+        if (substr) {
+          str += substr;
+        }
         res += acc * 60 * 60 * 24;
         acc = 0;
         break;
+
+      // Week, weeks or 'w'
       case 'w':
+      case 'W':
+        substr = strpluraleql(str + 1, "eek");
+        if (substr) {
+          str += substr;
+        }
         res += acc * 60 * 60 * 24 * 7;
         acc = 0;
         break;
@@ -199,13 +238,6 @@ static void change_count_value_func(sqlite3_context *context) {
   sqlite3_result_int64(context, change_count->count);
 }
 
-static void noop_step_func(sqlite3_context *context, int argc,
-                           sqlite3_value **argv) {
-  UNUSED(context);
-  UNUSED(argc);
-  UNUSED(argv);
-}
-
 #ifdef _WIN32
 __declspec(dllexport)
 #endif
@@ -289,4 +321,33 @@ __declspec(dllexport)
                                       NULL, NULL, NULL);
 
   return rc;
+}
+
+static void noop_step_func(sqlite3_context *context, int argc,
+                           sqlite3_value **argv) {
+  UNUSED(context);
+  UNUSED(argc);
+  UNUSED(argv);
+}
+
+static int strpluraleql(const unsigned char *str, const char *substr) {
+  int len = 0;
+  for (;; str++, substr++, len++) {
+    if (tolower(*str) != tolower(*substr)) {
+      if (*substr) {
+        // No match, substr has more content.
+        return 0;
+      }
+      break;
+    }
+    if (!(*str)) {
+      // End of string.
+      return len;
+    }
+  }
+  if (*str == 's' || *str == 'S') {
+    // Plural form, increment len for consumption of 's'.
+    len++;
+  }
+  return len;
 }

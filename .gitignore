@@ -1,2 +1,6 @@
 *.o
 *.so
+*.db
+*.db-*
+*.db.gz
+.vscode/

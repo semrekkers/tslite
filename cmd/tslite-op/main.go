@@ -8,17 +8,18 @@ import (
 	"net/url"
 	"os"
 
-	"go.uber.org/zap"
+	"github.com/semrekkers/tslite/internal/repository"
 
 	"github.com/semrekkers/go-sqlite3"
-	"github.com/semrekkers/tslite/internal/repository"
+	"go.uber.org/zap"
 )
 
 const defaultDB = "test.db?_journal=wal&_sync=normal&_timeout=8000&_fk=on"
 
 func main() {
 	var (
-		flagDB = flag.String("db", defaultDB, "Database `file` name")
+		flagDB   = flag.String("db", defaultDB, "Database `file` name")
+		flagInit = flag.Bool("init", false, "Initialize the database")
 	)
 	flag.Parse()
 
@@ -50,12 +51,8 @@ func main() {
 	}
 	defer db.Close()
 
-	useDB(db, log)
-}
-
-func useDB(db *sql.DB, log *zap.SugaredLogger) {
-	if err := repository.MigrateDatabase(db); err != nil {
-		log.Error(err)
+	if *flagInit {
+		repository.MigrateDatabase(db)
 	}
 }
 

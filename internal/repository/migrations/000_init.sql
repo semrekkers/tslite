@@ -1,4 +1,6 @@
-CREATE TABLE stock_samples (
+/* ---------- Samples ---------- */
+
+CREATE TABLE value_samples (
 	ts int PRIMARY KEY NOT NULL,
 	value real NOT NULL
 );
@@ -8,11 +10,19 @@ CREATE TABLE gauge_samples (
 	value real NOT NULL
 );
 
-CREATE TABLE pulse_samples (
+CREATE TABLE switch_samples (
 	ts int PRIMARY KEY NOT NULL,
 	value real NOT NULL
 );
 
+CREATE TABLE activity_samples (
+	ts int PRIMARY KEY NOT NULL,
+	value real NOT NULL
+);
+
+/* ---------- Aggregations ---------- */
+
+/*
 CREATE TABLE stock_aggr_1m (
 	ts int PRIMARY KEY NOT NULL,
 	value real NOT NULL
@@ -37,3 +47,4 @@ CREATE TABLE pulse_aggr_asr (
 	d3 int NOT NULL				-- end of decay
 	-- v3 is always 0.0
 );
+*/

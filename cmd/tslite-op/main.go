@@ -36,13 +36,15 @@ func main() {
 		ConnectHook: initConn,
 	})
 
-	dbDSN, err := url.Parse(*flagDB)
-	if err != nil {
-		log.Fatal(err)
-	}
+	if *flagInit {
+		dbDSN, err := url.Parse(*flagDB)
+		if err != nil {
+			log.Fatal(err)
+		}
 
-	if err = setupDB(dbDSN.Path); err != nil {
-		log.Fatal(err)
+		if err = setupDB(dbDSN.Path); err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	db, err := sql.Open("tslite", *flagDB)
@@ -54,6 +56,8 @@ func main() {
 	if *flagInit {
 		repository.MigrateDatabase(db)
 	}
+
+	setupHTTPServer(db, log)
 }
 
 func initConn(conn *sqlite3.SQLiteConn) error {

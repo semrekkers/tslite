@@ -2,5 +2,5 @@
 *.so
 *.db
 *.db-*
-*.db.gz
+*.db.*
 .vscode/

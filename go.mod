@@ -3,6 +3,7 @@ module github.com/semrekkers/tslite
 go 1.18
 
 require (
+	github.com/go-chi/chi/v5 v5.0.7
 	github.com/semrekkers/go-sqlite3 v1.14.14-sqlite3.39mod5
 	go.uber.org/zap v1.21.0
 )

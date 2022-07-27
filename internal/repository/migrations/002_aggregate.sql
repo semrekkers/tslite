@@ -19,5 +19,3 @@ CREATE VIEW value_all AS
 	SELECT ts, value FROM value_samples
 	UNION ALL
 	SELECT ts, value FROM value_aggr_1m;
-
-ANALYZE;

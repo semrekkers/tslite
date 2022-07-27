@@ -3,6 +3,7 @@ package repository
 import (
 	"database/sql"
 	"path"
+	"time"
 
 	"embed"
 )
@@ -28,4 +29,50 @@ func MigrateDatabase(db *sql.DB) {
 			panic(err)
 		}
 	}
+	if _, err = db.Exec("ANALYZE"); err != nil {
+		panic(err)
+	}
+}
+
+type ValueSample struct {
+	Timestamp time.Time `json:"ts"`
+	Value     float64   `json:"value"`
+}
+
+type TimeFrame struct {
+	Start, End time.Time
+	Interval   int64
+}
+
+func GetValueSamples(db *sql.DB, tf TimeFrame) ([]ValueSample, error) {
+	const query = `SELECT ts, value FROM value_all WHERE ts BETWEEN ? AND ? ORDER BY ts`
+
+	startTs := tf.Start.Unix()
+	rows, err := db.Query(query, startTs, tf.End.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var (
+		results = make([]ValueSample, 0, 32)
+		nextTs  = startTs
+		ts      int64
+		value   float64
+	)
+	for rows.Next() {
+		if err = rows.Scan(&ts, &value); err != nil {
+			return nil, err
+		}
+		if ts < nextTs {
+			continue // skip this sample, aligning with the Interval
+		}
+		results = append(results, ValueSample{
+			Timestamp: time.Unix(ts, 0),
+			Value:     value,
+		})
+		nextTs += tf.Interval
+	}
+
+	return results, nil
 }
